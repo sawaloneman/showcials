@@ -1,0 +1,30 @@
+name: Roku compiler toolchain
+on:
+  push:
+    paths:
+      - '.github/workflows/roku-toolchain.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  toolchain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned compiler without package lifecycle scripts
+        run: |
+          mkdir -p compiler
+          cd compiler
+          printf '{"private":true,"name":"showcials-compiler","version":"1.0.0"}\n' > package.json
+          npm install --ignore-scripts --no-audit --no-fund --save-exact brighterscript@0.73.0
+          node node_modules/brighterscript/dist/cli.js --version
+          npm ls --all > dependency-tree.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: showcials-brighterscript-0.73.0
+          path: compiler/
+          retention-days: 1
+          include-hidden-files: true
