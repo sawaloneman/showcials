@@ -1,0 +1,33 @@
+name: Showcials HLS player dependency
+on:
+  push:
+    paths:
+      - '.github/workflows/player-dependency.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  player:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare pinned dependency without lifecycle scripts
+        run: |
+          mkdir -p work output
+          cd work
+          printf '{"name":"showcials-player-toolchain","version":"1.0.0","private":true}\n' > package.json
+          npm install --ignore-scripts --no-audit --no-fund --save-exact hls.js@1.7.3
+          cp node_modules/hls.js/dist/hls.min.js ../output/
+          cp node_modules/hls.js/LICENSE ../output/hls.LICENSE
+          cp node_modules/hls.js/package.json ../output/hls.package.json
+          cp package-lock.json ../output/dependency-lock.json
+          cd ../output
+          sha256sum hls.min.js > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: showcials-hls-1.7.3
+          path: output/
+          retention-days: 1
