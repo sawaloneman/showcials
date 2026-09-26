@@ -69,10 +69,60 @@ function tone(){if(!musicOn||!musicCtx)return;const t=musicCtx.currentTime,o=mus
 function duckMusic(){if(!musicBus||!musicCtx)return;const quiet=S.voice||!$('watchroom').hidden&&!$('video').paused;musicBus.gain.setTargetAtTime(musicOn&&!quiet?pref.volume:0,musicCtx.currentTime,.35)}
 async function toggleMusic(){if(musicOn){musicOn=false;pref.music=false;duckMusic();for(const n of musicNodes)try{n.stop()}catch{}musicNodes=[];await musicCtx?.close();musicCtx=null;musicBus=null}else{const C=window.AudioContext||window.webkitAudioContext;if(!C)return notify('Audio is unavailable in this browser.');musicCtx=new C();await musicCtx.resume();musicBus=musicCtx.createGain();musicBus.gain.value=0;musicBus.connect(musicCtx.destination);[73.416,110,146.832,220.04,293.664].forEach((f,i)=>{const o=musicCtx.createOscillator(),g=musicCtx.createGain();o.type='sine';o.frequency.value=f;o.detune.value=i%2?3:-3;g.gain.value=i===0?.12:.025;o.connect(g).connect(musicBus);o.start();musicNodes.push(o)});musicOn=true;pref.music=true;duckMusic();[0,1,2,3].forEach((n)=>{const o=musicCtx.createOscillator(),g=musicCtx.createGain(),t=musicCtx.currentTime+n*.19;o.frequency.value=[293.664,440,587.328,880][n];g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.12,t+.04);g.gain.exponentialRampToValueAtTime(.0001,t+2.4);o.connect(g).connect(musicBus);o.start(t);o.stop(t+2.5)})}$('sound').textContent=musicOn?'♫ Sound on':'♫ Sound off';$('sound').setAttribute('aria-pressed',String(musicOn));savePrefs()}
 $('sound').onclick=()=>toggleMusic().catch(()=>notify('Sound could not start. Please try again.'));document.addEventListener('visibilitychange',()=>{if(musicBus&&musicCtx){if(document.hidden)musicBus.gain.setTargetAtTime(0,musicCtx.currentTime,.2);else duckMusic()}});
-function showVoice(){if(S.preview)return notify('Start a connected room for voice.');if(S.voice)return stopVoice();const c=modal('Talk together.');paragraph(c,'Your microphone will be heard by people in this room. Use headphones for a clearer conversation. You can turn it off at any time.');const l=el('label','setting','I am 18+ and this is not a child-directed session.'),i=el('input');i.type='checkbox';l.append(i);c.append(l);const b=button(c,'Turn my microphone on',async()=>{if(!i.checked)return notify('Confirm the voice-session notice first.');b.disabled=true;closeModal();await startVoice()});paragraph(c,'Your browser will ask for microphone permission. This app does not record the call; participants may record what they hear.','fine')}
+function showVoice(){if(S.preview)return notify('Start a connected room for voice.');if(S.voice||S.voiceStarting)return stopVoice();const c=modal('Talk together.');paragraph(c,'Your microphone will be heard by people in this room. Use headphones for a clearer conversation. You can turn it off at any time.');const l=el('label','setting','I am 18+ and this is not a child-directed session.'),i=el('input');i.type='checkbox';l.append(i);c.append(l);const b=button(c,'Turn my microphone on',async()=>{if(!i.checked)return notify('Confirm the voice-session notice first.');b.disabled=true;closeModal();await startVoice()});paragraph(c,'Your browser will ask for microphone permission. This app does not record the call; participants may record what they hear.','fine')}
 $('talk').onclick=showVoice;
-async function startVoice(){if(!connected())return notify('Join a room first.');if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)return notify('Voice needs the secure hosted website and microphone permission.');const gen=S.generation;let stream,ctx;try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});if(gen!==S.generation){stream.getTracks().forEach(t=>t.stop());return}ctx=new (window.AudioContext||window.webkitAudioContext)();await ctx.resume();await ctx.audioWorklet.addModule('/capture-worklet.js');if(gen!==S.generation){stream.getTracks().forEach(t=>t.stop());await ctx.close();return}const source=ctx.createMediaStreamSource(stream),worklet=new AudioWorkletNode(ctx,'orbit-capture'),zero=ctx.createGain();zero.gain.value=0;source.connect(worklet).connect(zero).connect(ctx.destination);const u=new URL('/voice',location.href);u.protocol=location.protocol==='https:'?'wss:':'ws:';u.searchParams.set('room',S.room);u.searchParams.set('clientId',S.id);u.searchParams.set('grant',S.grant);const ws=new WebSocket(u);ws.binaryType='arraybuffer';const voice={ws,stream,ctx,source,worklet,zero,from:'',times:new Map()};S.voice=voice;duckMusic();ws.onopen=()=>{if(S.voice!==voice){ws.close();return}$('talk').textContent='🎙 Microphone on · turn off';$('talk').setAttribute('aria-pressed','true');$('voiceStatus').textContent='Voice connected. Your microphone is live.'};worklet.port.onmessage=e=>{if(S.voice!==voice||ws.readyState!==1)return;if(ws.bufferedAmount<65536){ws.send(e.data);S.txFrames++}};ws.onmessage=e=>{if(S.voice!==voice)return;if(typeof e.data==='string'){let p;try{p=JSON.parse(e.data)}catch{return}if(p.type==='voice_frame')voice.from=p.from;if(p.type==='voice_state')$('voiceStatus').textContent='Microphone live · '+(p.roster?.length||1)+' in voice';return}if(!(e.data instanceof ArrayBuffer)||e.data.byteLength!==640)return;S.rxFrames++;const b=ctx.createBuffer(1,320,16000),x=b.getChannelData(0),dv=new DataView(e.data);for(let j=0;j<320;j++)x[j]=dv.getInt16(j*2,true)/32768;const node=ctx.createBufferSource();node.buffer=b;node.connect(ctx.destination);let t=Math.max(ctx.currentTime+.04,voice.times.get(voice.from)||0);if(t>ctx.currentTime+.4)t=ctx.currentTime+.04;node.start(t);voice.times.set(voice.from,t+.02);node.onended=()=>node.disconnect()};ws.onerror=()=>{};ws.onclose=()=>{if(S.voice===voice){stopVoice();notify('Voice disconnected. Tap Talk together to retry.')}};stream.getAudioTracks().forEach(t=>t.onended=()=>{if(S.voice===voice)stopVoice()})}catch(e){stream?.getTracks().forEach(t=>t.stop());if(ctx&&ctx.state!=='closed')ctx.close().catch(()=>{});S.voice=null;notify(e.name==='NotAllowedError'?'Microphone permission was not granted. You can still watch and type.':'Voice could not start on this device. You can still watch and type.');duckMusic()}}
-function stopVoice(){const v=S.voice;S.voice=null;if(v){try{v.ws.close()}catch{}v.stream.getTracks().forEach(t=>t.stop());try{v.source.disconnect();v.worklet.disconnect();v.zero.disconnect()}catch{}v.ctx.close().catch(()=>{})}$('talk').textContent='🎙 Talk together';$('talk').setAttribute('aria-pressed','false');$('voiceStatus').textContent=S.preview?'Voice is available in a connected room.':'Microphone is off. You’re in control.';duckMusic()}
+async function startVoice(){
+ // ORBIT_GESTURE_VOICE_V1: start audio inside the user's click, before permission awaits.
+ if(!connected())return notify('Join a room first.');
+ if(S.voice||S.voiceStarting)return;
+ if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)return notify('Voice needs the secure hosted website and microphone permission.');
+ const gen=S.generation,attempt={ctx:null,stream:null};S.voiceStarting=attempt;
+ const current=()=>S.generation===gen&&S.voiceStarting===attempt;
+ const cleanup=()=>{attempt.stream?.getTracks().forEach(t=>t.stop());if(attempt.ctx&&attempt.ctx.state!=='closed')attempt.ctx.close().catch(()=>{})};
+ const bounded=async(p,ms,label)=>{let timer;try{return await Promise.race([p,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(label)),ms)})])}finally{clearTimeout(timer)}};
+ let ctx,stream;
+ try{
+  ctx=attempt.ctx=new (window.AudioContext||window.webkitAudioContext)();
+  const resume=ctx.resume();resume.catch(()=>{});
+  $('talk').textContent='Cancel microphone setup';$('voiceStatus').textContent='Waiting for microphone permission…';
+  stream=attempt.stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+  if(!current()){cleanup();return}
+  $('voiceStatus').textContent='Starting audio…';
+  await bounded(resume,8000,'Audio did not start. Tap Talk together again.');
+  if(!current()){cleanup();return}
+  $('voiceStatus').textContent='Loading microphone capture…';
+  await bounded(ctx.audioWorklet.addModule('/capture-worklet.js'),10000,'Microphone module did not load. Check your connection.');
+  if(!current()){cleanup();return}
+  const source=ctx.createMediaStreamSource(stream),worklet=new AudioWorkletNode(ctx,'orbit-capture'),zero=ctx.createGain();
+  zero.gain.value=0;source.connect(worklet).connect(zero).connect(ctx.destination);
+  const u=new URL('/voice',location.href);u.protocol=location.protocol==='https:'?'wss:':'ws:';
+  u.searchParams.set('room',S.room);u.searchParams.set('clientId',S.id);u.searchParams.set('grant',S.grant);
+  const ws=new WebSocket(u);ws.binaryType='arraybuffer';
+  const voice={ws,stream,ctx,source,worklet,zero,from:'',times:new Map(),openTimer:null};
+  S.voice=voice;S.voiceStarting=null;S.rxFrames=0;S.txFrames=0;duckMusic();
+  $('voiceStatus').textContent='Connecting your voice to the room…';
+  voice.openTimer=setTimeout(()=>{if(S.voice===voice&&ws.readyState!==1){stopVoice();notify('Voice connection timed out. Tap Talk together to retry.')}},10000);
+  ws.onopen=()=>{clearTimeout(voice.openTimer);if(S.voice!==voice){ws.close();return}$('talk').textContent='🎙 Microphone on · turn off';$('talk').setAttribute('aria-pressed','true');$('voiceStatus').textContent='Voice connected. Your microphone is live.'};
+  worklet.port.onmessage=e=>{if(S.voice!==voice||ws.readyState!==1)return;if(ws.bufferedAmount<65536){ws.send(e.data);S.txFrames++}};
+  ws.onmessage=e=>{
+   if(S.voice!==voice)return;
+   if(typeof e.data==='string'){let p;try{p=JSON.parse(e.data)}catch{return}if(p.type==='voice_frame')voice.from=p.from;if(p.type==='voice_state')$('voiceStatus').textContent='Microphone live · '+(p.roster?.length||1)+' in voice';return}
+   if(!(e.data instanceof ArrayBuffer)||e.data.byteLength!==640)return;
+   S.rxFrames++;const buffer=ctx.createBuffer(1,320,16000),x=buffer.getChannelData(0),dv=new DataView(e.data);
+   for(let j=0;j<320;j++)x[j]=dv.getInt16(j*2,true)/32768;
+   const node=ctx.createBufferSource();node.buffer=buffer;node.connect(ctx.destination);
+   let t=Math.max(ctx.currentTime+.04,voice.times.get(voice.from)||0);if(t>ctx.currentTime+.4)t=ctx.currentTime+.04;
+   node.start(t);if(voice.times.size>24)voice.times.delete(voice.times.keys().next().value);voice.times.set(voice.from,t+.02);node.onended=()=>node.disconnect();
+  };
+  ws.onerror=()=>{};ws.onclose=()=>{clearTimeout(voice.openTimer);if(S.voice===voice){stopVoice();notify('Voice disconnected. Tap Talk together to retry.')}};
+  stream.getAudioTracks().forEach(t=>t.onended=()=>{if(S.voice===voice)stopVoice()});
+ }catch(e){
+  cleanup();if(S.voiceStarting!==attempt)return;S.voiceStarting=null;
+  $('talk').textContent='🎙 Talk together';$('talk').setAttribute('aria-pressed','false');$('voiceStatus').textContent='Microphone is off. Tap Talk together to retry.';
+  notify(e.name==='NotAllowedError'?'Microphone permission was not granted. You can still watch and type.':e.message||'Voice could not start. You can still watch and type.');duckMusic();
+ }
+}
+function stopVoice(){const pending=S.voiceStarting;S.voiceStarting=null;if(pending){pending.stream?.getTracks().forEach(t=>t.stop());if(pending.ctx&&pending.ctx.state!=='closed')pending.ctx.close().catch(()=>{})}const v=S.voice;S.voice=null;if(v){clearTimeout(v.openTimer);try{v.ws.close()}catch{}v.stream.getTracks().forEach(t=>t.stop());try{v.source.disconnect();v.worklet.disconnect();v.zero.disconnect()}catch{}v.ctx.close().catch(()=>{})}$('talk').textContent='🎙 Talk together';$('talk').setAttribute('aria-pressed','false');$('voiceStatus').textContent=S.preview?'Voice is available in a connected room.':'Microphone is off. You’re in control.';duckMusic()}
 window.addEventListener('beforeunload',()=>{if(S.voice)S.voice.stream.getTracks().forEach(t=>t.stop());S.ws?.close()});
 savePrefs();requestAnimationFrame(()=>{updateGallery();scrollChannel(2)});
 if((window.ORBIT_OFFLINE||location.protocol==='file:')){$('connection').textContent='Local preview';if(!window.ORBIT_HOME)setTimeout(previewRoom,100)}else{request('/api/health').then(()=>{$('connection').textContent='Ready when you are';$('connection').classList.add('ready')}).catch(()=>{$('connection').textContent='Connection unavailable';notify('The server could not be reached. Try refreshing.')});const code=new URLSearchParams(location.hash.slice(1)).get('room');if(code)setTimeout(()=>showJoin(code),100);else if(location.pathname==='/preview')setTimeout(previewRoom,100)}
