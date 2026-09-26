@@ -20,10 +20,16 @@ jobs:
           cd interpreter
           printf '{"name":"showcials-native-logic-toolchain","private":true,"version":"1.0.0"}\n' > package.json
           npm install --ignore-scripts --no-audit --no-fund --save-exact brs@0.45.0
-          printf 'print "INTERPRETER_SMOKE_PASS"\n' > smoke.brs
-          node node_modules/brs/bin/cli.js smoke.brs
           npm ls --all > dependency-tree.txt
+      - name: Execute isolated BrightScript smoke
+        run: |
+          cd interpreter
+          mkdir -p smoke-root
+          printf 'title=Test\nmajor_version=1\nminor_version=0\nbuild_version=0\n' > smoke-root/manifest
+          printf 'sub main()\n  print "INTERPRETER_SMOKE_PASS"\nend sub\n' > smoke-root/smoke.brs
+          node -e 'require("brs").execute([process.cwd()+"/smoke-root/smoke.brs"],{root:process.cwd()+"/smoke-root"}).catch(e=>{console.error(e.stack||e);process.exitCode=1})' 2>&1 | tee smoke.log
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: showcials-brs-0.45.0
           path: interpreter/
