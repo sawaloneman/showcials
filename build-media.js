@@ -1,0 +1,14 @@
+'use strict';
+// Original procedural artwork and soundtrack. No external media downloads.
+const fs=require('node:fs'),zlib=require('node:zlib'),path=require('node:path'),{execFileSync}=require('node:child_process');
+const W=960,H=540,raw=Buffer.alloc((W*3+1)*H);
+function crc(b){let c=0xffffffff;for(const v of b){c^=v;for(let i=0;i<8;i++)c=(c>>>1)^((c&1)?0xedb88320:0)}return(c^0xffffffff)>>>0}
+function chunk(type,data){const t=Buffer.from(type),n=Buffer.alloc(4),c=Buffer.alloc(4);n.writeUInt32BE(data.length);c.writeUInt32BE(crc(Buffer.concat([t,data])));return Buffer.concat([n,t,data,c])}
+for(let y=0;y<H;y++)for(let x=0;x<W;x++){const p=y*(W*3+1)+1+x*3,dx=x-W*.69,dy=y-H*.43,d=Math.hypot(dx,dy),a=Math.hypot(dx/1.46,dy*2.9);let r=7+y/H*5,g=15+y/H*12,b=27+y/H*17;const glow=Math.exp(-Math.pow(d/165,2))*.34;r+=glow*110;g+=glow*100;b+=glow*62;if(d<99){const l=Math.max(0,Math.sqrt(1-(d/99)**2)*.65-dx/220-dy/290);r=24+l*222;g=34+l*191;b=41+l*123}if(Math.abs(a-133)<1.25&&(dy>18||d>99)){r=192;g=176;b=137}if(Math.abs(a-141)<.5&&d>99){r+=30;g+=30;b+=25}if(((x*3919+y*7919)%5311)<2&&d>135){r=157;g=165;b=177}raw[p]=Math.min(255,r);raw[p+1]=Math.min(255,g);raw[p+2]=Math.min(255,b)}
+const ih=Buffer.alloc(13);ih.writeUInt32BE(W);ih.writeUInt32BE(H,4);ih[8]=8;ih[9]=2;
+fs.mkdirSync('web',{recursive:true});fs.writeFileSync('web/orbit-art.png',Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ih),chunk('IDAT',zlib.deflateSync(raw,{level:9})),chunk('IEND',Buffer.alloc(0))]));
+const font='/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
+const vf=`zoompan=z='min(zoom+0.00015,1.1)':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=960x540:fps=24,drawtext=fontfile=${font}:text='SHOWCIALS':fontsize=18:fontcolor=0xdcc38c:x=58:y=54,drawtext=fontfile=${font}:text='YOUR PRIVATE ORBIT':fontsize=10:fontcolor=0xc1cbd0:x=60:y=86,drawtext=fontfile=${font}:text='A little closer.':fontsize=37:fontcolor=0xf5eddc:x=58:y=300,drawtext=fontfile=${font}:text='A world away.':fontsize=37:fontcolor=0xdac79f:x=58:y=354,drawtext=fontfile=${font}:text='Original motion study / 24 seconds':fontsize=12:fontcolor=0xafc0c9:x=60:y=470,format=yuv420p`;
+execFileSync('ffmpeg',['-y','-loglevel','error','-loop','1','-framerate','24','-i','web/orbit-art.png','-f','lavfi','-i','aevalsrc=0.022*sin(2*PI*110*t)+0.013*sin(2*PI*164.8138*t)+0.009*sin(2*PI*220*t):s=48000:d=24','-vf',vf,'-t','24','-c:v','libx264','-preset','fast','-crf','27','-c:a','aac','-b:a','64k','-movflags','+faststart','web/orbit.mp4'],{stdio:'inherit'});
+try{const f=path.join(path.dirname(require.resolve('hls.js')),'hls.min.js');fs.copyFileSync(f,'web/hls.min.js')}catch{if(!fs.existsSync('web/hls.min.js'))throw Error('Install hls.js to build the web player.')}
+console.log('Original media and local HLS player are ready.');

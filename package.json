@@ -1,0 +1,1 @@
+{"name":"showcials-orbit","version":"11.0.0","private":true,"engines":{"node":">=22"},"scripts":{"start":"node server.js","build":"node build-media.js","test":"node tests/protocol.js"},"dependencies":{"ws":"8.21.3","hls.js":"1.7.3"}}
