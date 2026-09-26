@@ -82,6 +82,7 @@ jobs:
           python tests/tv-integration.py 2>&1 | tee test-results/tv-integration.log
           python tests/browser.py 2>&1 | tee test-results/local-browser.log
           python tests/nebula-ui.py 2>&1 | tee test-results/local-nebula.log
+          python tests/open-films.py 2>&1 | tee test-results/local-films.log
           cp nebula-desktop.png test-results/local-desktop.png
       - name: Commit only after local acceptance passes
         run: |
@@ -91,6 +92,8 @@ jobs:
           git add -- server.js package.json package-lock.json Dockerfile lib/tv-session.js web/tv.js web/roku-connector.py web/app.js web/index.html web/environment.js web/experience.js web/nebula.css web/artwork-fallback.svg tools/build-library.js tests/nebula-ui.py tests/tv-session.js tests/tv-connector.py tests/tv-integration.py web/library.json web/library-data.js web/artwork
           if ! git diff --cached --quiet; then
             git commit -m 'Publish tested Nebula cinema, credited film collection and local Roku connector'
+            git fetch origin main
+            git rebase origin/main
             git push
           fi
           git rev-parse HEAD | tee test-results/source-commit.txt
@@ -103,6 +106,7 @@ jobs:
           node -e "(async()=>{for(let i=0;i<180;i++){try{const r=await fetch(process.env.BASE_URL+'/api/health');if(r.ok&&(await r.json()).version==='12.0.0')return}catch{}await new Promise(r=>setTimeout(r,2000))}throw Error('Tested release is not deployed yet')})()"
           python tests/browser.py 2>&1 | tee test-results/hosted-browser.log
           python tests/nebula-ui.py 2>&1 | tee test-results/hosted-nebula.log
+          python tests/open-films.py 2>&1 | tee test-results/hosted-films.log
       - name: Package reproducible app and generated media
         if: always()
         run: |
@@ -124,5 +128,6 @@ jobs:
             test-results/
             nebula-*.png
             orbit-*.png
+            film-*.png
             nebula-tested-source.zip
           retention-days: 7
