@@ -1,0 +1,31 @@
+name: Native BrightScript logic toolchain
+on:
+  push:
+    paths:
+      - '.github/workflows/native-logic-toolchain.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  interpreter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned test-only interpreter, without lifecycle scripts
+        run: |
+          mkdir -p interpreter
+          cd interpreter
+          printf '{"name":"showcials-native-logic-toolchain","private":true,"version":"1.0.0"}\n' > package.json
+          npm install --ignore-scripts --no-audit --no-fund --save-exact brs@0.45.0
+          printf 'print "INTERPRETER_SMOKE_PASS"\n' > smoke.brs
+          node node_modules/brs/bin/cli.js smoke.brs
+          npm ls --all > dependency-tree.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: showcials-brs-0.45.0
+          path: interpreter/
+          include-hidden-files: true
+          retention-days: 3
