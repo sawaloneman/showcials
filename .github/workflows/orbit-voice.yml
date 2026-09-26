@@ -18,16 +18,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Apply reviewed microphone startup correction
+      - name: Apply reviewed microphone compatibility correction
         run: |
           set -euo pipefail
           node tools/fix-voice-activation.js
+          node tools/add-capture-fallback.js
           node --check web/app.js
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -- web/app.js
           if ! git diff --cached --quiet; then
-            git commit -m 'Start Web Audio in the user gesture and make microphone startup cancellable'
+            git commit -m 'Add real microphone compatibility capture when AudioWorklet cannot initialize'
             git push
           fi
       - name: Install media and browser tools
@@ -61,7 +62,7 @@ jobs:
           PYTHONUNBUFFERED: '1'
         run: |
           set -euo pipefail
-          node -e "(async()=>{for(let i=0;i<150;i++){try{let r=await fetch(process.env.BASE_URL+'/app.js?voice-acceptance=1');if(r.ok&&(await r.text()).includes('ORBIT_GESTURE_VOICE_V1'))return}catch{}await new Promise(r=>setTimeout(r,2000))}process.exit(1)})()"
+          node -e "(async()=>{for(let i=0;i<150;i++){try{let r=await fetch(process.env.BASE_URL+'/app.js?voice-acceptance=2');if(r.ok&&(await r.text()).includes('ORBIT_CAPTURE_FALLBACK_V1'))return}catch{}await new Promise(r=>setTimeout(r,2000))}process.exit(1)})()"
           python tests/browser.py 2>&1 | tee test-results/hosted-browser.log
       - uses: actions/upload-artifact@v4
         if: always()
@@ -70,6 +71,12 @@ jobs:
           path: |
             orbit-*.png
             test-results/
-            tests/browser.py
-            web/app.js
+            tests/
+            web/
+            lib/
+            package.json
+            package-lock.json
+            server.js
+            build-media.js
+            Dockerfile
           retention-days: 7
