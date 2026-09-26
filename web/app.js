@@ -71,6 +71,20 @@ async function toggleMusic(){if(musicOn){musicOn=false;pref.music=false;duckMusi
 $('sound').onclick=()=>toggleMusic().catch(()=>notify('Sound could not start. Please try again.'));document.addEventListener('visibilitychange',()=>{if(musicBus&&musicCtx){if(document.hidden)musicBus.gain.setTargetAtTime(0,musicCtx.currentTime,.2);else duckMusic()}});
 function showVoice(){if(S.preview)return notify('Start a connected room for voice.');if(S.voice||S.voiceStarting)return stopVoice();const c=modal('Talk together.');paragraph(c,'Your microphone will be heard by people in this room. Use headphones for a clearer conversation. You can turn it off at any time.');const l=el('label','setting','I am 18+ and this is not a child-directed session.'),i=el('input');i.type='checkbox';l.append(i);c.append(l);const b=button(c,'Turn my microphone on',async()=>{if(!i.checked)return notify('Confirm the voice-session notice first.');b.disabled=true;closeModal();await startVoice()});paragraph(c,'Your browser will ask for microphone permission. This app does not record the call; participants may record what they hear.','fine')}
 $('talk').onclick=showVoice;
+function compatibleCapture(ctx){
+ // ORBIT_CAPTURE_FALLBACK_V1: legacy fallback only if AudioWorklet cannot start.
+ if(!ctx.createScriptProcessor)throw Error('This browser cannot start microphone capture.');
+ const node=ctx.createScriptProcessor(2048,1,1),port={onmessage:null};
+ let tail=new Float32Array(0),position=0,frame=new Int16Array(320),used=0;
+ const step=ctx.sampleRate/16000;
+ node.onaudioprocess=e=>{
+  for(let c=0;c<e.outputBuffer.numberOfChannels;c++)e.outputBuffer.getChannelData(c).fill(0);
+  const x=e.inputBuffer.getChannelData(0),b=new Float32Array(tail.length+x.length);b.set(tail);b.set(x,tail.length);
+  while(position+1<b.length){const n=Math.floor(position),fraction=position-n,v=Math.max(-1,Math.min(1,b[n]*(1-fraction)+b[n+1]*fraction));frame[used++]=Math.round(v*(v<0?32768:32767));if(used===320){port.onmessage?.({data:frame.buffer});frame=new Int16Array(320);used=0}position+=step}
+  const consumed=Math.min(Math.floor(position),b.length-1);tail=b.slice(consumed);position-=consumed;
+ };
+ return {node,port};
+}
 async function startVoice(){
  // ORBIT_GESTURE_VOICE_V1: start audio inside the user's click, before permission awaits.
  if(!connected())return notify('Join a room first.');
@@ -83,6 +97,7 @@ async function startVoice(){
  let ctx,stream;
  try{
   ctx=attempt.ctx=new (window.AudioContext||window.webkitAudioContext)();
+  const driver=ctx.createConstantSource(),quiet=ctx.createGain();quiet.gain.value=0;driver.connect(quiet).connect(ctx.destination);driver.start();
   const resume=ctx.resume();resume.catch(()=>{});
   $('talk').textContent='Cancel microphone setup';$('voiceStatus').textContent='Waiting for microphone permission…';
   stream=attempt.stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
@@ -91,9 +106,10 @@ async function startVoice(){
   await bounded(resume,8000,'Audio did not start. Tap Talk together again.');
   if(!current()){cleanup();return}
   $('voiceStatus').textContent='Loading microphone capture…';
-  await bounded(ctx.audioWorklet.addModule('/capture-worklet.js'),10000,'Microphone module did not load. Check your connection.');
+  let modern=true;try{if(!ctx.audioWorklet)throw Error('AudioWorklet unavailable');await bounded(ctx.audioWorklet.addModule('/capture-worklet.js'),2500,'Capture startup delayed')}catch{modern=false}
   if(!current()){cleanup();return}
-  const source=ctx.createMediaStreamSource(stream),worklet=new AudioWorkletNode(ctx,'orbit-capture'),zero=ctx.createGain();
+  const source=ctx.createMediaStreamSource(stream),fallback=modern?null:compatibleCapture(ctx),worklet=modern?new AudioWorkletNode(ctx,'orbit-capture'):fallback.node,zero=ctx.createGain(),capturePort=modern?worklet.port:fallback.port;
+  S.captureEngine=modern?'AudioWorklet':'Compatibility capture';
   zero.gain.value=0;source.connect(worklet).connect(zero).connect(ctx.destination);
   const u=new URL('/voice',location.href);u.protocol=location.protocol==='https:'?'wss:':'ws:';
   u.searchParams.set('room',S.room);u.searchParams.set('clientId',S.id);u.searchParams.set('grant',S.grant);
@@ -103,7 +119,7 @@ async function startVoice(){
   $('voiceStatus').textContent='Connecting your voice to the room…';
   voice.openTimer=setTimeout(()=>{if(S.voice===voice&&ws.readyState!==1){stopVoice();notify('Voice connection timed out. Tap Talk together to retry.')}},10000);
   ws.onopen=()=>{clearTimeout(voice.openTimer);if(S.voice!==voice){ws.close();return}$('talk').textContent='🎙 Microphone on · turn off';$('talk').setAttribute('aria-pressed','true');$('voiceStatus').textContent='Voice connected. Your microphone is live.'};
-  worklet.port.onmessage=e=>{if(S.voice!==voice||ws.readyState!==1)return;if(ws.bufferedAmount<65536){ws.send(e.data);S.txFrames++}};
+  capturePort.onmessage=e=>{if(S.voice!==voice||ws.readyState!==1)return;if(ws.bufferedAmount<65536){ws.send(e.data);S.txFrames++}};
   ws.onmessage=e=>{
    if(S.voice!==voice)return;
    if(typeof e.data==='string'){let p;try{p=JSON.parse(e.data)}catch{return}if(p.type==='voice_frame')voice.from=p.from;if(p.type==='voice_state')$('voiceStatus').textContent='Microphone live · '+(p.roster?.length||1)+' in voice';return}
