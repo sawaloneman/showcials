@@ -1,0 +1,5 @@
+{
+  "sha256": "98e4f58307da39ee89154db617068b5fa5449763d294129df213a3a337501720",
+  "parts": ["orbit.00.b64", "orbit.01.b64", "orbit.02.b64", "orbit.03.b64", "orbit.04.b64"],
+  "files": ["package.json", "Dockerfile", "server.js", "build-media.js", "lib/native-voice.js", "web/index.html", "web/style.css", "web/app.js", "web/capture-worklet.js", "web/favicon.svg", "tests/protocol.js", "tests/browser.py"]
+}
