@@ -9,7 +9,7 @@ def wait(page, expression, seconds=30):
     while time.monotonic()<deadline:
         if page.evaluate('() => Boolean('+expression+')'): return
         page.wait_for_timeout(150)
-    print('DIAGNOSTICS',page.evaluate('''() => {const v=document.querySelector('video');return {media:v?{src:v.currentSrc,ready:v.readyState,network:v.networkState,error:v.error?{code:v.error.code,message:v.error.message}:null,duration:v.duration,paused:v.paused,time:v.currentTime}:null,joined:!!window.SC?.id,sync:window.SC?.sync,toast:document.querySelector('#toast')?.textContent,connection:document.querySelector('#peopleStatus')?.textContent}}'''))
+    print('DIAGNOSTICS',page.evaluate('''() => {const v=document.querySelector('video');return {media:v?{src:v.currentSrc,ready:v.readyState,network:v.networkState,error:v.error?{code:v.error.code,message:v.error.message}:null,duration:v.duration,paused:v.paused,time:v.currentTime}:null,joined:!!window.SC?.id,voice:window.SC?.voice?{socket:SC.voice.ws.readyState,context:SC.voice.ctx.state}:null,voiceStatus:document.querySelector('#voiceStatus')?.textContent,visibility:document.visibilityState,focused:document.hasFocus(),toast:document.querySelector('#toast')?.textContent,connection:document.querySelector('#peopleStatus')?.textContent}}'''))
     page.screenshot(path=str(R/'orbit-failure.png'),full_page=True)
     raise AssertionError('Timed out: '+expression)
 with sync_playwright() as p:
@@ -35,9 +35,9 @@ with sync_playwright() as p:
     wait(z,'SC.id.length>0')
     wait(z,'document.querySelector("video").readyState>=1')
     wait(a,'SC.members.length===2')
-    a.locator('#play').click();a.wait_for_timeout(3500)
+    a.bring_to_front();a.locator('#play').click();a.wait_for_timeout(3500)
     if z.locator('#enablePlayback').is_visible():
-        z.locator('#enablePlayback').click();a.wait_for_timeout(1000)
+        z.bring_to_front();z.locator('#enablePlayback').click();a.wait_for_timeout(1000)
     wait(a,'document.querySelector("video").currentTime>1 && !document.querySelector("video").paused')
     wait(z,'document.querySelector("video").currentTime>1 && !document.querySelector("video").paused')
     x=a.locator('video').evaluate('(v)=>({time:v.currentTime,paused:v.paused})')
@@ -56,6 +56,7 @@ with sync_playwright() as p:
     a.locator('#play').click();a.wait_for_timeout(1500)
     assert z.locator('video').evaluate('(v)=>v.paused');print('PAUSE synced')
     for page in [a,z]:
+        page.bring_to_front()
         page.locator('#talk').click()
         page.locator('#dialogContent input[type=checkbox]').check()
         page.locator('#dialogContent .primary').click()
