@@ -1,6 +1,6 @@
 """Real two-browser acceptance. Audio capture is synthetic, not microphone hardware."""
 from pathlib import Path
-import os, time
+import os, time, json
 from playwright.sync_api import sync_playwright
 R=Path(__file__).resolve().parents[1]
 BASE=os.environ.get('BASE_URL','http://127.0.0.1:7801')
@@ -9,12 +9,15 @@ def wait(page, expression, seconds=30):
     while time.monotonic()<deadline:
         if page.evaluate('() => Boolean('+expression+')'): return
         page.wait_for_timeout(150)
+    print('DIAGNOSTICS',page.evaluate('''() => {const v=document.querySelector('video');return {media:v?{src:v.currentSrc,ready:v.readyState,network:v.networkState,error:v.error?{code:v.error.code,message:v.error.message}:null,duration:v.duration,paused:v.paused,time:v.currentTime}:null,joined:!!window.SC?.id,sync:window.SC?.sync,toast:document.querySelector('#toast')?.textContent,connection:document.querySelector('#peopleStatus')?.textContent}}'''))
+    page.screenshot(path=str(R/'orbit-failure.png'),full_page=True)
     raise AssertionError('Timed out: '+expression)
 with sync_playwright() as p:
     b=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_EXECUTABLE'),headless=True,args=['--no-sandbox','--disable-dev-shm-usage','--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream'])
     c=b.new_context(viewport={'width':1440,'height':1050},permissions=['microphone'])
     a=c.new_page(); errs=[]
     a.on('pageerror',lambda e:errs.append(str(e)))
+    a.on('console',lambda m:print('BROWSER',m.text) if m.type=='error' else None)
     a.goto(BASE,wait_until='networkidle')
     a.screenshot(path=str(R/'orbit-desktop.png'),full_page=True)
     print('HOME',a.title(),a.locator('#connection').inner_text(),errs)
@@ -22,23 +25,24 @@ with sync_playwright() as p:
     a.locator('#dialogContent input').fill('Host')
     a.locator('#dialogContent .primary').click()
     wait(a,'SC.id.length>0')
-    wait(a,'document.querySelector("video").readyState>=2')
-    room=a.evaluate('SC.room');print('ROOM created')
+    wait(a,'document.querySelector("video").readyState>=1')
+    room=a.evaluate('SC.room');print('ROOM created with real media metadata')
     d=b.new_context(viewport={'width':1200,'height':900},permissions=['microphone'])
     z=d.new_page();z.on('pageerror',lambda e:errs.append(str(e)))
     z.goto(BASE+'/#room='+room)
     z.locator('#dialogContent input').nth(1).fill('Guest')
     z.locator('#dialogContent .primary').click()
     wait(z,'SC.id.length>0')
-    wait(z,'document.querySelector("video").readyState>=2')
+    wait(z,'document.querySelector("video").readyState>=1')
     wait(a,'SC.members.length===2')
     a.locator('#play').click();a.wait_for_timeout(3500)
     if z.locator('#enablePlayback').is_visible():
         z.locator('#enablePlayback').click();a.wait_for_timeout(1000)
+    wait(a,'document.querySelector("video").currentTime>1 && !document.querySelector("video").paused')
+    wait(z,'document.querySelector("video").currentTime>1 && !document.querySelector("video").paused')
     x=a.locator('video').evaluate('(v)=>({time:v.currentTime,paused:v.paused})')
     y=z.locator('video').evaluate('(v)=>({time:v.currentTime,paused:v.paused})')
     print('PLAY',x,y,'DRIFT',abs(x['time']-y['time']))
-    assert not x['paused'] and not y['paused'] and x['time']>1
     assert abs(x['time']-y['time'])<1.5
     a.locator('#chatText').fill('Hello, orbit!');a.locator('#chatForm button').click()
     z.get_by_text('Hello, orbit!',exact=True).wait_for()
