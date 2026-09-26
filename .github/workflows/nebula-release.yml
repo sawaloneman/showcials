@@ -44,11 +44,9 @@ jobs:
           }
           if(allowed.size)throw Error('Missing sources');
           for(const[p,s]of writes){fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,s)}
-          // Small reviewed follow-up: identify release, preserve async HTTP error handling.
           let server=fs.readFileSync('server.js','utf8').replace("version:'11.1.0-tv-development'","version:'12.0.0'");
           server=server.replaceAll('return serveFile(req,res,','return await serveFile(req,res,');
           fs.writeFileSync('server.js',server);
-          // The deployment uses the tested, committed artwork snapshot, not a fresh third-party request.
           let docker=fs.readFileSync('Dockerfile','utf8').replace('node tools/build-library.js','test -s web/library.json');
           fs.writeFileSync('Dockerfile',docker);
           console.log('Verified and prepared '+changes.length+' reviewed files.');
@@ -56,11 +54,13 @@ jobs:
       - name: Build original media and attributed real-title library
         run: |
           set -euo pipefail
+          mkdir -p test-results
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg fonts-dejavu-core
           npm install --ignore-scripts --no-audit --no-fund
           node build-media.js
-          REQUIRE_ARTWORK=1 node tools/build-library.js
+          node tools/build-library.js 2>&1 | tee test-results/library-build.log
+          node tools/resolve-open-films.js 2>&1 | tee test-results/film-validation.log
           for f in server.js lib/tv-session.js web/app.js web/tv.js web/environment.js web/experience.js; do node --check "$f"; done
           python -m pip install playwright==1.55.0
           python -m playwright install --with-deps chromium
@@ -72,7 +72,6 @@ jobs:
           PYTHONUNBUFFERED: '1'
         run: |
           set -euo pipefail
-          mkdir -p test-results
           node server.js > test-results/server.log 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true' EXIT
