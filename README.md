@@ -1,21 +1,38 @@
-# Showcials — Private Cinema
+# SHOWCIALS / ORBIT EDITION
 
-An original watch-party interface for a browser companion, native Roku channel and authenticated Node.js relay. This repository is being populated from the validated v7 development bundle.
+**Live app:** https://showcials-orbit-production.up.railway.app/
 
-## Implementation
+**One-person preview:** https://showcials-orbit-production.up.railway.app/preview
 
-The browser companion provides a shared room, synchronized authorized direct-media playback, chat, voice transport, saved moments, connected-player capability reports and an in-app Roku remote. Its separate standalone HTML preview includes an original local MP4 and clearly labels local-only interactions.
+Open the website. Choose **Start a room**, enter a display name, and use **Invite**. A guest opens the invitation, enters their name, and joins. The host controls playback. **Talk together** enables the microphone only after consent and browser permission.
 
-Subscription services stay in their official players. Browser-extension control is experimental and provider-specific. The manual shared-clock mode does not embed subscriptions or bypass DRM. Each viewer needs their own authorized access.
+## Experience
 
-The native Roku source implements foreground push-to-talk using a supported remote, system permission and an in-app control activated with OK. Physical Roku microphone capture and speaker playback remain unverified. The website does not remap a physical shortcut button.
+Calm sci-fi styling, rotating CSS 3D channel boxes, optional original ambient music and startup chime, large controls, larger text, reduced motion, and stronger contrast. Menu sound starts off. The built-in sample is an original motion study, available in equivalent MP4 and WebM formats. No installation or extension is needed for sample playback, room chat, or supported authorized direct video.
 
-## Release gates
+## Verified September 26, 2026 UTC
 
-Passing local HTTP/WebSocket and generic Chromium tests does not establish Netflix/Hulu compatibility or Roku hardware support. Release requires successful BrightScript compilation of both the source and extracted channel ZIP, a physical Roku test, real browser voice sessions, provider validation and a healthy hosted deployment.
+GitHub Actions run `36209811998` completed successfully against application source commit `080ebdfc07e48c6f34b95e86db48dcabaa91421f`.
 
-The completed source bundle and detailed test evidence are being delivered in the associated ChatGPT conversation. This README alone is not a running application.
+- 15 real HTTP/WebSocket protocol checks, including native REST protocol interoperability and voice transport.
+- Two actual Chromium clients against a local server: playback, seeking, pause, two-way text-safe chat, microphone transmit/receive using synthetic input, voice stop, larger text, reduced motion, and phone-sized layout.
+- The same browser scenario passed against the public HTTPS deployment. The sampled public playback difference was 0.171773 seconds, not a worst-case latency guarantee.
+- Audio tests use synthetic devices. They do not certify real microphone quality, echo, phone hardware, physical Roku, or every browser.
 
-## Privacy
+The native Roku package delivered with the release has the hosted address preconfigured and compiles with zero errors. It still requires developer-mode installation and physical-device testing. The CSS 3D gallery is the web UI, not a Roku WebGL implementation.
 
-Do not commit relay keys, account cookies, recordings or private configuration. A relay access key grants access to that private relay; invitation links must omit it. Preserve microphone permissions and recording indicators.
+## Honest service scope
+
+Netflix/Hulu cards explain the external-player boundary. This deployment does not embed subscription movies or automatically synchronize Netflix/Hulu's native Roku apps. The earlier experimental extension/bridge are not deployed by this Orbit edition. There is no DRM bypass or subscription access included.
+
+## Privacy and operating limits
+
+Rooms are unlisted, not account-protected: anyone with the code can join. Share codes privately. Up to 12 members per room; rooms/messages are held in memory and are lost when the server restarts. Empty rooms expire. No accounts, moderation system, end-to-end encryption, app voice recording, or analytics. Participants can record what they hear; hosting infrastructure can retain operational metadata.
+
+Voice is opt-in. Preserve microphone permission prompts and recording indicators. The microphone code retains a compatibility capture fallback when AudioWorklet cannot initialize; do not infer that every browser/audio engine was tested.
+
+## Development
+
+Node.js 22+, FFmpeg, and DejaVu Sans are needed to build the original media. Run `npm install`, `npm run build`, then `npm start`. The Dockerfile installs the build requirements. Runtime packages are version-pinned. The downloaded release includes the lockfile generated by the tested build.
+
+The app listens on `PORT` (default 7741). Railway hosts it in the owner's account. Hosting usage can incur charges; no indefinite free-hosting guarantee is made. Never commit passwords, private keys, cookies, or recordings.
