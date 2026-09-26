@@ -68,7 +68,7 @@ const server=http.createServer(async(req,res)=>{try{
   throw problem(405,'Method not allowed.');
  }
  if(req.method==='GET'||req.method==='HEAD'){
-  const table={'/':['index.html','text/html; charset=utf-8'],'/preview':['index.html','text/html; charset=utf-8'],'/hls.min.js':['hls.min.js','text/javascript; charset=utf-8'],'/app.js':['app.js','text/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8'],'/capture-worklet.js':['capture-worklet.js','text/javascript; charset=utf-8'],'/media/orbit.mp4':['orbit.mp4','video/mp4'],'/favicon.svg':['favicon.svg','image/svg+xml']};
+  const table={'/':['index.html','text/html; charset=utf-8'],'/preview':['index.html','text/html; charset=utf-8'],'/hls.min.js':['hls.min.js','text/javascript; charset=utf-8'],'/app.js':['app.js','text/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8'],'/capture-worklet.js':['capture-worklet.js','text/javascript; charset=utf-8'],'/media/orbit.mp4':['orbit.mp4','video/mp4'],'/media/orbit.webm':['orbit.webm','video/webm'],'/compat.js':['compat.js','text/javascript; charset=utf-8'],'/favicon.svg':['favicon.svg','image/svg+xml']};
   if(table[p])return await serveFile(req,res,path.join(ROOT,'web',table[p][0]),table[p][1]);
  }
  throw problem(404,'Not found.');
