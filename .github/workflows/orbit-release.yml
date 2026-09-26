@@ -12,6 +12,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash
 concurrency:
   group: orbit-web-acceptance
   cancel-in-progress: true
@@ -41,21 +44,23 @@ jobs:
           BASE_URL: 'http://127.0.0.1:7801'
           PYTHONUNBUFFERED: '1'
         run: |
+          set -euo pipefail
           mkdir -p test-results
           node server.js > test-results/server.log 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
           node -e "(async()=>{for(let i=0;i<50;i++){try{if((await fetch(process.env.BASE_URL+'/api/health')).ok)return}catch{}await new Promise(r=>setTimeout(r,200))}process.exit(1)})()"
-          node tests/protocol.js | tee test-results/protocol.log
-          python tests/browser.py | tee test-results/browser.log
+          node tests/protocol.js 2>&1 | tee test-results/protocol.log
+          python tests/browser.py 2>&1 | tee test-results/browser.log
           cp orbit-room.png test-results/local-room.png
       - name: Public HTTPS app with two browser clients
         env:
           BASE_URL: 'https://showcials-orbit-production.up.railway.app'
           PYTHONUNBUFFERED: '1'
         run: |
+          set -euo pipefail
           node -e "(async()=>{for(let i=0;i<90;i++){try{let r=await fetch(process.env.BASE_URL+'/api/health');if(r.ok&&(await r.json()).version==='11.0.0')return}catch{}await new Promise(r=>setTimeout(r,2000))}process.exit(1)})()"
-          python tests/browser.py | tee test-results/hosted-browser.log
+          python tests/browser.py 2>&1 | tee test-results/hosted-browser.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
