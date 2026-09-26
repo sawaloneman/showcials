@@ -2,7 +2,7 @@ name: Orbit web acceptance
 on:
   push:
     paths:
-      - 'imports/manifest.json'
+      - '.github/workflows/orbit-release.yml'
       - 'server.js'
       - 'build-media.js'
       - 'package.json'
@@ -11,7 +11,7 @@ on:
       - 'tests/**'
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: orbit-web-acceptance
   cancel-in-progress: true
@@ -24,39 +24,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Expand verified application source when importing
+      - name: Install build and browser tools
         run: |
-          if [ ! -f server.js ]; then
-          node <<'NODE'
-          const fs=require('fs'),zlib=require('zlib'),crypto=require('crypto'),cp=require('child_process'),path=require('path');
-          const m=JSON.parse(fs.readFileSync('imports/manifest.json','utf8'));
-          const packed=Buffer.from(m.parts.map(p=>{if(!/^orbit\.\d\d\.b64$/.test(p))throw Error('Invalid part');return fs.readFileSync('imports/'+p,'utf8').trim()}).join(''),'base64');
-          if(crypto.createHash('sha256').update(packed).digest('hex')!==m.sha256)throw Error('Source integrity check failed');
-          const source=JSON.parse(zlib.brotliDecompressSync(packed,{maxOutputLength:1048576}));
-          const allowed=['package.json','Dockerfile','server.js','build-media.js','lib/native-voice.js','web/index.html','web/style.css','web/app.js','web/capture-worklet.js','web/favicon.svg','tests/protocol.js','tests/browser.py'];
-          for(const p of allowed){if(typeof source[p]!=='string')throw Error('Missing source '+p);if(fs.existsSync(p))throw Error('Refusing to overwrite '+p);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,source[p]);}
-          cp.execFileSync('git',['config','user.name','github-actions[bot]']);
-          cp.execFileSync('git',['config','user.email','41898282+github-actions[bot]@users.noreply.github.com']);
-          cp.execFileSync('git',['add','--',...allowed]);
-          cp.execFileSync('git',['commit','-m','Publish complete Showcials Orbit web application source']);
-          cp.execFileSync('git',['push']);
-          NODE
-          fi
-      - name: Install pinned runtime and generate original demo media
-        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
           npm install --ignore-scripts --no-audit --no-fund
           node --check server.js
           node --check web/app.js
           node build-media.js
-      - name: Install browser test tools
-        run: |
           python -m pip install playwright==1.55.0
           python -m playwright install --with-deps chromium
-      - name: Real network, browser, and synthetic voice acceptance
+      - name: Real local network, browser, and synthetic voice acceptance
         env:
           PORT: '7801'
           HOST: '127.0.0.1'
           BASE_URL: 'http://127.0.0.1:7801'
+          PYTHONUNBUFFERED: '1'
         run: |
           mkdir -p test-results
           node server.js > test-results/server.log 2>&1 &
@@ -65,6 +48,14 @@ jobs:
           node -e "(async()=>{for(let i=0;i<50;i++){try{if((await fetch(process.env.BASE_URL+'/api/health')).ok)return}catch{}await new Promise(r=>setTimeout(r,200))}process.exit(1)})()"
           node tests/protocol.js | tee test-results/protocol.log
           python tests/browser.py | tee test-results/browser.log
+          cp orbit-room.png test-results/local-room.png
+      - name: Public HTTPS app with two browser clients
+        env:
+          BASE_URL: 'https://showcials-orbit-production.up.railway.app'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          node -e "(async()=>{for(let i=0;i<90;i++){try{let r=await fetch(process.env.BASE_URL+'/api/health');if(r.ok&&(await r.json()).version==='11.0.0')return}catch{}await new Promise(r=>setTimeout(r,2000))}process.exit(1)})()"
+          python tests/browser.py | tee test-results/hosted-browser.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
