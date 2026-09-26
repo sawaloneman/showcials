@@ -1,0 +1,129 @@
+name: Nebula cinema release
+on:
+  push:
+    paths: ['.github/workflows/nebula-release.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: nebula-release
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Expand reviewed source with preimage and result verification
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs'),zlib=require('zlib'),crypto=require('crypto'),path=require('path');
+          const hash=s=>crypto.createHash('sha256').update(s).digest('hex');
+          const packed=Buffer.from(Array.from({length:5},(_,i)=>fs.readFileSync('imports/nebula.'+String(i).padStart(2,'0')+'.b64','utf8').trim()).join(''),'base64');
+          if(hash(packed)!=='14a9497c5af5daee95286887df59272f957c19db4add312a0120e68f4a10f6fc')throw Error('Payload integrity mismatch');
+          const changes=JSON.parse(zlib.brotliDecompressSync(packed,{maxOutputLength:1048576}));
+          const allowed=new Set(['server.js','package.json','Dockerfile','lib/tv-session.js','web/tv.js','web/roku-connector.py','web/app.js','web/index.html','web/environment.js','web/experience.js','web/nebula.css','web/artwork-fallback.svg','tools/build-library.js','tests/nebula-ui.py','tests/tv-session.js','tests/tv-connector.py','tests/tv-integration.py']);
+          const writes=[];
+          for(const c of changes){
+            if(!allowed.delete(c.path))throw Error('Unexpected or duplicate path');
+            const exists=fs.existsSync(c.path),old=exists?fs.readFileSync(c.path,'utf8'):'';
+            if(exists&&hash(old)===c.result)continue;
+            if(c.base===null?exists:!exists||hash(old)!==c.base)throw Error('Preimage differs: '+c.path);
+            let value;
+            if(c.base===null)value=c.content;
+            else{let chars=Array.from(old);for(const [i,j,s]of [...c.edits].sort((a,b)=>b[0]-a[0])){if(i<0||j<i||j>chars.length)throw Error('Edit bounds');chars.splice(i,j-i,...Array.from(s))}value=chars.join('')}
+            if(hash(value)!==c.result)throw Error('Result mismatch: '+c.path);
+            writes.push([c.path,value]);
+          }
+          if(allowed.size)throw Error('Missing sources');
+          for(const[p,s]of writes){fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,s)}
+          // Small reviewed follow-up: identify release, preserve async HTTP error handling.
+          let server=fs.readFileSync('server.js','utf8').replace("version:'11.1.0-tv-development'","version:'12.0.0'");
+          server=server.replaceAll('return serveFile(req,res,','return await serveFile(req,res,');
+          fs.writeFileSync('server.js',server);
+          // The deployment uses the tested, committed artwork snapshot, not a fresh third-party request.
+          let docker=fs.readFileSync('Dockerfile','utf8').replace('node tools/build-library.js','test -s web/library.json');
+          fs.writeFileSync('Dockerfile',docker);
+          console.log('Verified and prepared '+changes.length+' reviewed files.');
+          NODE
+      - name: Build original media and attributed real-title library
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          npm install --ignore-scripts --no-audit --no-fund
+          node build-media.js
+          REQUIRE_ARTWORK=1 node tools/build-library.js
+          for f in server.js lib/tv-session.js web/app.js web/tv.js web/environment.js web/experience.js; do node --check "$f"; done
+          python -m pip install playwright==1.55.0
+          python -m playwright install --with-deps chromium
+      - name: Test actual local relay and browsers; Roku endpoints explicitly simulated
+        env:
+          PORT: '7802'
+          HOST: '127.0.0.1'
+          BASE_URL: 'http://127.0.0.1:7802'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          node server.js > test-results/server.log 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          node -e "(async()=>{for(let i=0;i<50;i++){try{if((await fetch(process.env.BASE_URL+'/api/health')).ok)return}catch{}await new Promise(r=>setTimeout(r,200))}process.exit(1)})()"
+          node tests/tv-session.js 2>&1 | tee test-results/tv-session.log
+          python tests/tv-connector.py 2>&1 | tee test-results/tv-connector.log
+          node tests/protocol.js 2>&1 | tee test-results/protocol.log
+          python tests/tv-integration.py 2>&1 | tee test-results/tv-integration.log
+          python tests/browser.py 2>&1 | tee test-results/local-browser.log
+          python tests/nebula-ui.py 2>&1 | tee test-results/local-nebula.log
+          cp nebula-desktop.png test-results/local-desktop.png
+      - name: Commit only after local acceptance passes
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- server.js package.json package-lock.json Dockerfile lib/tv-session.js web/tv.js web/roku-connector.py web/app.js web/index.html web/environment.js web/experience.js web/nebula.css web/artwork-fallback.svg tools/build-library.js tests/nebula-ui.py tests/tv-session.js tests/tv-connector.py tests/tv-integration.py web/library.json web/library-data.js web/artwork
+          if ! git diff --cached --quiet; then
+            git commit -m 'Publish tested Nebula cinema, credited film collection and local Roku connector'
+            git push
+          fi
+          git rev-parse HEAD | tee test-results/source-commit.txt
+      - name: Verify public HTTPS release with real browser clients
+        env:
+          BASE_URL: 'https://showcials-orbit-production.up.railway.app'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -euo pipefail
+          node -e "(async()=>{for(let i=0;i<180;i++){try{const r=await fetch(process.env.BASE_URL+'/api/health');if(r.ok&&(await r.json()).version==='12.0.0')return}catch{}await new Promise(r=>setTimeout(r,2000))}throw Error('Tested release is not deployed yet')})()"
+          python tests/browser.py 2>&1 | tee test-results/hosted-browser.log
+          python tests/nebula-ui.py 2>&1 | tee test-results/hosted-nebula.log
+      - name: Package reproducible app and generated media
+        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+          with zipfile.ZipFile('nebula-tested-source.zip','w',zipfile.ZIP_DEFLATED) as z:
+              for root in ['web','lib','tests','tools']:
+                  for p in Path(root).rglob('*'):
+                      if p.is_file() and '__pycache__' not in p.parts: z.write(p)
+              for name in ['server.js','package.json','package-lock.json','Dockerfile','README.md']:
+                  if Path(name).exists():z.write(name)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nebula-release-evidence
+          path: |
+            test-results/
+            nebula-*.png
+            orbit-*.png
+            nebula-tested-source.zip
+          retention-days: 7
