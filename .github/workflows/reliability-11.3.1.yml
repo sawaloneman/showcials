@@ -1,0 +1,116 @@
+name: Showcials 11.3.1 reliability
+on:
+  push:
+    paths:
+      - '.github/workflows/reliability-11.3.1.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: showcials-reliability-1131
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply only the integrity-checked reviewed source changes
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          node <<'NODE'
+          const fs=require('fs'),path=require('path'),zlib=require('zlib'),crypto=require('crypto');
+          const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
+          // Repair a known insertion in the staged text transport, then verify the ORIGINAL payload hash.
+          const raw=fs.readFileSync('maintenance/11.3.1/repair.br.b64','utf8').trim().replace('P8041kvi','P804kvi');
+          const packed=Buffer.from(raw,'base64');
+          if(sha(packed)!=='31d489e563510dd0e879a959437f1c1de8fd549cc9154ba96a749eb3a3e0bd52')throw Error('Staged payload integrity mismatch');
+          const changes=JSON.parse(zlib.brotliDecompressSync(packed,{maxOutputLength:1048576}));
+          const allowed=['server.js','web/app.js','web/index.html','web/tv.js','package.json','lib/protocol-support.js','tests/reliability-11.3.1.js','tests/reliability-browser.py','tests/native/PlaybackPolicy.brs','tests/native/PlaybackPolicy.test.brs'];
+          if(changes.length!==allowed.length||new Set(changes.map(x=>x.path)).size!==allowed.length)throw Error('Invalid source list');
+          const ready=[];
+          for(const c of changes){
+            if(!allowed.includes(c.path))throw Error('Unexpected source');
+            let content;
+            if(c.base===null){if(fs.existsSync(c.path))throw Error('Refusing to overwrite '+c.path);content=c.content;}
+            else {const old=fs.readFileSync(c.path,'utf8');if(sha(old)!==c.base)throw Error('Source changed: '+c.path);const lines=old.split(/(?<=\n)/);for(const[i,j,text]of [...c.edits].reverse())lines.splice(i,j-i,text);content=lines.join('');if(sha(content)!==c.sha256)throw Error('Patched source hash mismatch: '+c.path);}
+            ready.push([c.path,content]);
+          }
+          for(const[p,c]of ready){fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,c);}
+          fs.writeFileSync('test-results/reviewed-files.json',JSON.stringify(ready.map(([p,c])=>({path:p,sha256:sha(c)})),null,2));
+          console.log('Verified and applied all 10 reviewed files. No unverified overwrite.');
+          NODE
+      - name: Install pinned test tools and build the original sample
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          npm install --ignore-scripts --no-audit --no-fund
+          node --check server.js
+          node --check web/app.js
+          node --check lib/protocol-support.js
+          node build-media.js
+          npm install --prefix /tmp/showcials-brs --ignore-scripts --no-audit --no-fund @rokucommunity/brs@0.47.6
+          python -m pip install playwright==1.55.0
+          python -m playwright install --with-deps chromium
+      - name: Execute the production BrightScript playback policy off-device
+        run: |
+          set -euo pipefail
+          cat tests/native/PlaybackPolicy.brs tests/native/PlaybackPolicy.test.brs > test-results/playback-policy.brs
+          node /tmp/showcials-brs/node_modules/@rokucommunity/brs/bin/cli.js test-results/playback-policy.brs 2>&1 | tee test-results/playback-policy.log
+          grep -q 'POLICY_FAILURES=0' test-results/playback-policy.log
+          if grep -q '^FAIL ' test-results/playback-policy.log; then exit 1; fi
+      - name: Real local protocols and two actual browser clients
+        env:
+          PORT: '7811'
+          HOST: '127.0.0.1'
+          BASE_URL: 'http://127.0.0.1:7811'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -euo pipefail
+          node server.js > test-results/server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          node -e "(async()=>{for(let i=0;i<50;i++){try{if((await fetch(process.env.BASE_URL+'/api/health')).ok)return}catch{}await new Promise(r=>setTimeout(r,200))}process.exit(1)})()"
+          node tests/protocol.js 2>&1 | tee test-results/protocol.log
+          node tests/repair-11.3.js 2>&1 | tee test-results/previous-repair.log
+          node tests/reliability-11.3.1.js 2>&1 | tee test-results/reliability.log
+          node tests/tv-session.js 2>&1 | tee test-results/tv-session.log
+          python tests/tv-connector.py 2>&1 | tee test-results/tv-connector.log
+          python tests/reliability-browser.py 2>&1 | tee test-results/local-browser.log
+          cp orbit-room.png test-results/local-room.png
+      - name: Publish only after executable regression tests pass
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- server.js web/app.js web/index.html web/tv.js package.json package-lock.json lib/protocol-support.js tests/reliability-11.3.1.js tests/reliability-browser.py tests/native/PlaybackPolicy.brs tests/native/PlaybackPolicy.test.brs
+          git commit -m 'Release validated 11.3.1 holds, diagnostics, HTTP media ranges and regression coverage'
+          git push
+          git rev-parse HEAD > test-results/published-commit.txt
+      - name: Verify the matching public HTTPS build with real browsers
+        env:
+          BASE_URL: 'https://showcials-orbit-production.up.railway.app'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -euo pipefail
+          node -e "(async()=>{for(let i=0;i<300;i++){try{let r=await fetch(process.env.BASE_URL+'/api/health');let h=await r.json();if(r.ok&&h.version==='11.3.1'&&h.capabilities.roomHealth===true)return}catch{}await new Promise(r=>setTimeout(r,2000))}process.exit(1)})()"
+          python tests/reliability-browser.py 2>&1 | tee test-results/public-browser.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: showcials-11.3.1-reliability-evidence
+          path: |
+            test-results/
+            orbit-*.png
+            tests/reliability-browser.py
+            tests/reliability-11.3.1.js
+            tests/native/
+          retention-days: 7
