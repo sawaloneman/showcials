@@ -1,0 +1,100 @@
+"""Real two-browser acceptance. Audio capture is synthetic, not microphone hardware."""
+from pathlib import Path
+import os, time, json
+from playwright.sync_api import sync_playwright
+R=Path(__file__).resolve().parents[1]
+BASE=os.environ.get('BASE_URL','http://127.0.0.1:7801')
+def wait(page, expression, seconds=30):
+    deadline=time.monotonic()+seconds
+    while time.monotonic()<deadline:
+        if page.evaluate('() => Boolean('+expression+')'): return
+        page.wait_for_timeout(150)
+    print('DIAGNOSTICS',page.evaluate('''() => {const v=document.querySelector('video');return {media:v?{src:v.currentSrc,ready:v.readyState,network:v.networkState,error:v.error?{code:v.error.code,message:v.error.message}:null,duration:v.duration,paused:v.paused,time:v.currentTime}:null,joined:!!window.SC?.id,voice:window.SC?.voice?{socket:SC.voice.ws.readyState,context:SC.voice.ctx.state}:null,voiceStatus:document.querySelector('#voiceStatus')?.textContent,visibility:document.visibilityState,focused:document.hasFocus(),toast:document.querySelector('#toast')?.textContent,connection:document.querySelector('#peopleStatus')?.textContent}}'''))
+    page.screenshot(path=str(R/'orbit-failure.png'),full_page=True)
+    raise AssertionError('Timed out: '+expression)
+with sync_playwright() as p:
+    b=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_EXECUTABLE'),headless=True,args=['--no-sandbox','--disable-dev-shm-usage','--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream'])
+    c=b.new_context(viewport={'width':1440,'height':1050},permissions=['microphone'])
+    a=c.new_page(); errs=[]
+    a.on('pageerror',lambda e:errs.append(str(e)))
+    a.on('console',lambda m:print('BROWSER',m.text) if m.type=='error' else None)
+    a.goto(BASE,wait_until='networkidle')
+    a.screenshot(path=str(R/'orbit-desktop.png'),full_page=True)
+    print('HOME',a.title(),a.locator('#connection').inner_text(),errs)
+    a.locator('#start').click()
+    a.locator('#dialogContent input').fill('Host')
+    a.locator('#dialogContent .primary').click()
+    wait(a,'SC.id.length>0')
+    wait(a,'document.querySelector("video").readyState>=1')
+    room=a.evaluate('SC.room');print('ROOM created with real media metadata')
+    d=b.new_context(viewport={'width':1200,'height':900},permissions=['microphone'])
+    z=d.new_page();z.on('pageerror',lambda e:errs.append(str(e)))
+    z.goto(BASE+'/#room='+room)
+    z.locator('#dialogContent input').nth(1).fill('Guest')
+    z.locator('#dialogContent .primary').click()
+    wait(z,'SC.id.length>0')
+    wait(z,'document.querySelector("video").readyState>=1')
+    wait(a,'SC.members.length===2')
+    a.bring_to_front();a.locator('#play').click();a.wait_for_timeout(3500)
+    if z.locator('#enablePlayback').is_visible():
+        z.bring_to_front();z.locator('#enablePlayback').click();a.wait_for_timeout(1000)
+    wait(a,'document.querySelector("video").currentTime>1 && !document.querySelector("video").paused')
+    wait(z,'document.querySelector("video").currentTime>1 && !document.querySelector("video").paused')
+    x=a.locator('video').evaluate('(v)=>({time:v.currentTime,paused:v.paused})')
+    y=z.locator('video').evaluate('(v)=>({time:v.currentTime,paused:v.paused})')
+    print('PLAY',x,y,'DRIFT',abs(x['time']-y['time']))
+    assert abs(x['time']-y['time'])<1.5
+    a.locator('#chatText').fill('Hello, orbit!');a.locator('#chatForm button').click()
+    z.get_by_text('Hello, orbit!',exact=True).wait_for()
+    z.locator('#chatText').fill('<img src=x onerror=alert(1)>');z.locator('#chatForm button').click()
+    a.get_by_text('<img src=x onerror=alert(1)>',exact=True).wait_for()
+    assert a.locator('#messages img').count()==0
+    print('CHAT two-way and text-safe')
+
+    # Exercise live+hold packets directly through the real room; paused is not an equivalent test.
+    a.evaluate("async () => {await send('sync', {mode:'native',mediaUrl:S.sync.mediaUrl,mediaTitle:S.sync.mediaTitle,format:'mp4',runtimeSec:24,positionSec:6,status:'live',hold:true});}")
+    wait(a,'document.querySelector("video").paused')
+    wait(z,'document.querySelector("video").paused')
+    hold_a=a.locator('video').evaluate('(v)=>v.currentTime')
+    hold_z=z.locator('video').evaluate('(v)=>v.currentTime')
+    a.wait_for_timeout(1800)
+    assert abs(a.locator('video').evaluate('(v)=>v.currentTime')-hold_a)<.2
+    assert abs(z.locator('video').evaluate('(v)=>v.currentTime')-hold_z)<.2
+    assert abs(z.evaluate('target()')-6)<.2
+    print('HOLD both real players remain paused and the shared clock stays frozen')
+    a.bring_to_front();a.locator('#play').click()
+    wait(z,'!document.querySelector("video").paused')
+    wait(a,'S.sync.hold===false')
+    print('RESUME explicit host Play clears hold and resumes the follower')
+    a.locator('#roomHealth').click()
+    a.get_by_role('heading',name='Check this room',exact=True).wait_for()
+    assert 'diagnostics' in a.locator('#dialogContent').inner_text()
+    a.locator('#closeDialog').click()
+    print('HEALTH connection diagnostics open and close through real UI controls')
+
+    a.locator('#forwardTen').click();a.wait_for_timeout(3000)
+    x=a.locator('video').evaluate('(v)=>v.currentTime');y=z.locator('video').evaluate('(v)=>v.currentTime')
+    print('SEEK',x,y);assert abs(x-y)<1.5 and x>10
+    a.locator('#play').click();a.wait_for_timeout(1500)
+    assert z.locator('video').evaluate('(v)=>v.paused');print('PAUSE synced')
+    for page in [a,z]:
+        page.bring_to_front()
+        page.locator('#talk').click()
+        page.locator('#dialogContent input[type=checkbox]').check()
+        page.locator('#dialogContent .primary').click()
+        wait(page,'SC.voice && SC.voice.ws.readyState===1')
+    wait(a,'SC.rxFrames>5 && SC.txFrames>5');wait(z,'SC.rxFrames>5 && SC.txFrames>5')
+    print('VOICE synthetic capture and bidirectional binary receive',a.evaluate('({rx:SC.rxFrames,tx:SC.txFrames})'))
+    a.screenshot(path=str(R/'orbit-room.png'),full_page=True)
+    a.locator('#talk').click();wait(a,'SC.voice===null')
+    assert a.locator('#talk').get_attribute('aria-pressed')=='false';print('VOICE stop')
+    a.locator('#leave').click();a.locator('#settings').click()
+    a.get_by_label('Larger text').check()
+    assert a.evaluate('parseFloat(getComputedStyle(document.documentElement).fontSize)>18')
+    a.get_by_label('Less motion',exact=False).check();a.locator('#closeDialog').click()
+    print('ACCESSIBILITY larger text and less motion')
+    mobile=b.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
+    m=mobile.new_page();m.goto(BASE);m.screenshot(path=str(R/'orbit-mobile.png'),full_page=True)
+    assert m.evaluate('document.documentElement.scrollWidth<=innerWidth+1');print('MOBILE no overflow')
+    assert not errs,errs;print('NO PAGE ERRORS')
+    b.close()

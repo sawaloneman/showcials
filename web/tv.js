@@ -34,7 +34,7 @@
  }
  function open(){
   const c=modal('Your subscriptions. On your Roku.');root=c;
-  paragraph(c,'Developer hardware test · provider compatibility unverified or a published Roku Store integration.','tv-notice');
+  paragraph(c,'Developer hardware test · provider compatibility is unverified; not a published Roku Store integration.','tv-notice');
   if(!connected()||S.preview){
    paragraph(c,'First start or join a real room. Subscription playback stays in the official Roku app; Showcials keeps chat and voice in this browser.');
    button(c,'Start a room',showStart);button(c,'Join a room',()=>showJoin(),'secondary');return;
