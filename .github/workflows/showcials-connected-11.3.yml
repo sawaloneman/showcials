@@ -1,0 +1,116 @@
+name: Showcials 11.3 connected release
+on:
+  push:
+    paths:
+      - '.github/workflows/showcials-connected-11.3.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: showcials-connected-11-3
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  validate-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify all source hashes before applying the reviewed patch
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs'),z=require('zlib'),c=require('crypto');
+          const packed=Buffer.from([0,1,2,3].map(n=>fs.readFileSync('maintenance/11.3/part'+n+'.b64','utf8').trim()).join(''),'base64');
+          if(c.createHash('sha256').update(packed).digest('hex')!=='9fa3c42a507466b92d3946e8cb99fb0c58ea090768c863d80eb0ecfe462d8cfb')throw Error('Patch integrity failure');
+          fs.writeFileSync('/tmp/showcials-11.3-patch.json',z.brotliDecompressSync(packed,{maxOutputLength:1048576}));
+          NODE
+          python3 <<'PY'
+          from pathlib import Path
+          import json, hashlib
+          patch=json.loads(Path('/tmp/showcials-11.3-patch.json').read_text())
+          allowed={'package.json','server.js','lib/native-voice.js','lib/request-budget.js','lib/tv-session.js','web/index.html','web/app.js','web/style.css','web/tv.js','web/roku-connector.py','tests/repair-11.3.js','tests/tv-session.js','tests/tv-connector.py','tests/tv-integration.py'}
+          assert set(patch)==allowed,'Unexpected patch paths'
+          digest=lambda s:hashlib.sha256(s.encode()).hexdigest()
+          results={}
+          for name,item in patch.items():
+              p=Path(name);old=p.read_text() if p.exists() else ''
+              if p.exists() and digest(old)==item['new']:continue
+              if item['old'] is None:
+                  assert not p.exists(),'New path already exists: '+name
+                  new=item['content']
+              else:
+                  assert digest(old)==item['old'],'Source changed; refusing overwrite: '+name
+                  new=old
+                  for start,end,text in reversed(item['edits']):new=new[:start]+text+new[end:]
+              assert digest(new)==item['new'],'Target integrity failure: '+name
+              results[p]=new
+          for p,text in results.items():
+              p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text)
+          Path('/tmp/showcials-11.3-paths.txt').write_text('\n'.join(sorted(allowed)))
+          print('Verified all 14 source targets before writing.')
+          PY
+      - name: Install pinned runtime and build original demonstration media
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          npm install --ignore-scripts --no-audit --no-fund
+          node --check server.js
+          node --check web/app.js
+          node --check web/tv.js
+          node build-media.js
+          python3 -m pip install playwright==1.55.0
+          python3 -m playwright install --with-deps chromium
+      - name: Actual local protocols, simulated TV devices, and native browser networking
+        env:
+          HOST: '127.0.0.1'
+          PORT: '7802'
+          BASE_URL: 'http://127.0.0.1:7802'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          node server.js > test-results/server.log 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          node -e "(async()=>{for(let i=0;i<50;i++){try{if((await fetch(process.env.BASE_URL+'/api/health')).ok)return}catch{}await new Promise(r=>setTimeout(r,200))}process.exit(1)})()"
+          node tests/protocol.js 2>&1 | tee test-results/protocol.log
+          node tests/repair-11.3.js 2>&1 | tee test-results/repair.log
+          node tests/tv-session.js 2>&1 | tee test-results/tv-session.log
+          python3 tests/tv-connector.py 2>&1 | tee test-results/tv-connector.log
+          python3 tests/tv-integration.py 2>&1 | tee test-results/tv-integration.log
+          python3 tests/browser.py 2>&1 | tee test-results/local-browser.log
+      - name: Commit only validated application changes
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          mapfile -t PATHS < /tmp/showcials-11.3-paths.txt
+          git add -- "${PATHS[@]}"
+          if ! git diff --cached --quiet; then
+            git commit -m 'Repair native voice request budgets and final audio, movie durations, and connected TV validation'
+            git push
+          fi
+          git rev-parse HEAD | tee test-results/validated-commit.txt
+      - name: Verify public deployed version, playback, chat and synthetic microphone transport
+        env:
+          BASE_URL: 'https://showcials-orbit-production.up.railway.app'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -euo pipefail
+          node -e "(async()=>{for(let i=0;i<240;i++){try{const r=await fetch(process.env.BASE_URL+'/api/health',{signal:AbortSignal.timeout(5000)});if(r.ok&&(await r.json()).version==='11.3.0')return}catch{}await new Promise(r=>setTimeout(r,2000))}throw Error('Version 11.3.0 not deployed')})()"
+          python3 tests/browser.py 2>&1 | tee test-results/public-browser.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: showcials-11.3-connected-evidence
+          path: |
+            test-results/
+            orbit-*.png
+          retention-days: 7
