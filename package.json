@@ -1,1 +1,19 @@
-{"name":"showcials-orbit","version":"11.0.0","private":true,"engines":{"node":">=22"},"scripts":{"start":"node server.js","build":"node build-media.js","test":"node tests/protocol.js"},"dependencies":{"ws":"8.21.3","hls.js":"1.7.3"}}
+{
+  "name": "showcials-orbit",
+  "version": "11.3.0",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "build": "node build-media.js",
+    "test": "node tests/protocol.js",
+    "test:tv": "node tests/tv-session.js && python3 tests/tv-connector.py",
+    "test:repair": "node tests/repair-11.3.js"
+  },
+  "dependencies": {
+    "ws": "8.21.3",
+    "hls.js": "1.7.3"
+  }
+}

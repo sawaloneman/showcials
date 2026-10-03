@@ -8,3 +8,5 @@
 .halo{left:50%;width:min(840px,100vw);transform:translateX(-50%)}
 .topbar{position:sticky;top:0}
 @media(max-width:780px){.topbar{flex-wrap:wrap}.topbar #settings{display:block}.topbar nav{margin-left:auto}}
+/* Roku hardware-validation panel */
+.tv-device{padding:1rem;margin:.8rem 0;border:1px solid #72726a;border-radius:16px;background:#111a20}.tv-device h3{font-size:1.1rem}.tv-device button{margin:.35rem .35rem .35rem 0}.tv-command{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.9rem;background:#060c12;padding:1rem;border-radius:12px}.tv-notice{border-left:3px solid #cfb476;padding-left:.8rem;color:#eee2c7}#tv-service{width:100%;font:inherit;padding:.8rem;background:#111a20;color:#fff;border:1px solid #82878b;border-radius:10px}
