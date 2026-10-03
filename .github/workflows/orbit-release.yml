@@ -29,6 +29,7 @@ jobs:
           node-version: '22'
       - name: Install build and browser tools
         run: |
+          set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg fonts-dejavu-core
           npm install --ignore-scripts --no-audit --no-fund
@@ -46,6 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p test-results
+          git rev-parse HEAD > test-results/source-commit.txt
           node server.js > test-results/server.log 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
@@ -59,7 +61,19 @@ jobs:
           PYTHONUNBUFFERED: '1'
         run: |
           set -euo pipefail
-          node -e "(async()=>{for(let i=0;i<90;i++){try{let r=await fetch(process.env.BASE_URL+'/api/health');if(r.ok&&(await r.json()).version==='11.0.0')return}catch{}await new Promise(r=>setTimeout(r,2000))}process.exit(1)})()"
+          node <<'NODE' 2>&1 | tee test-results/public-version.log
+          const version=require('./package.json').version;
+          (async()=>{let last='unreachable';for(let i=0;i<90;i++){
+            try {const r=await fetch(process.env.BASE_URL+'/api/health',{signal:AbortSignal.timeout(5000)});
+              if(r.ok){const j=await r.json();last=j.version;if(j.version===version){
+                const html=await (await fetch(process.env.BASE_URL+'/',{signal:AbortSignal.timeout(5000)})).text();
+                if(!html.includes('/app.js?v='+version)||!html.includes('/tv.js?v='+version))throw Error('Release asset URLs do not match');
+                console.log('PASS public release version and versioned controls:',version);return;
+              }}
+            }catch(e){last=e.message;}
+            await new Promise(r=>setTimeout(r,2000));
+          }throw Error('Expected public version '+version+'; last response '+last);})().catch(e=>{console.error(e.message);process.exit(1)});
+          NODE
           python tests/browser.py 2>&1 | tee test-results/hosted-browser.log
       - uses: actions/upload-artifact@v4
         if: always()
