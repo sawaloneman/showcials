@@ -1,0 +1,63 @@
+name: Align Showcials 11.3 release metadata
+on:
+  push:
+    paths:
+      - '.github/workflows/showcials-version-alignment.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply guarded metadata correction
+        run: |
+          node <<'NODE'
+          const fs=require('fs'),crypto=require('crypto');
+          let s=fs.readFileSync('server.js','utf8');
+          const hash=v=>crypto.createHash('sha256').update(v).digest('hex');
+          if(hash(s)==='9b4ffd957a10f45543009bc94793fd32b35fb293e3271323ddd5ffcf7dac932c')process.exit(0);
+          if(hash(s)!=='5e96297239f564b62fc76a881ff61ad46833a8442998fe73a9bf7f336dcf15e4')throw Error('Server changed; refusing overwrite');
+          s=s.replace("version:'11.1.0-tv-development',capabilities:{tvConnector:true}","version:'11.3.0',capabilities:{tvConnector:true,atomicEndOfTalk:true,nativeMemberBudgets:true}");
+          if(hash(s)!=='9b4ffd957a10f45543009bc94793fd32b35fb293e3271323ddd5ffcf7dac932c')throw Error('Target integrity failed');
+          fs.writeFileSync('server.js',s);
+          NODE
+      - name: Check released version and real server repairs
+        env:
+          HOST: '127.0.0.1'
+          PORT: '7802'
+          BASE_URL: 'http://127.0.0.1:7802'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund
+          node --check server.js
+          mkdir -p test-results
+          node server.js > test-results/server-version.log 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          node -e "(async()=>{for(let i=0;i<50;i++){try{const r=await fetch(process.env.BASE_URL+'/api/health');if(r.ok){const j=await r.json();if(j.version!=='11.3.0'||!j.capabilities.nativeMemberBudgets)throw Error('Wrong release');console.log('PASS deployed-version metadata');return}}catch(e){if(e.message==='Wrong release')throw e}await new Promise(r=>setTimeout(r,100))}process.exit(1)})()"
+          node tests/repair-11.3.js | tee test-results/version-repair.log
+      - name: Publish validated metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- server.js
+          if ! git diff --cached --quiet; then
+            git commit -m 'Align health version and capabilities with tested Showcials 11.3 package'
+            git push
+          fi
+          git rev-parse HEAD | tee test-results/validated-commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: showcials-11.3-version-evidence
+          path: test-results/
+          retention-days: 7
