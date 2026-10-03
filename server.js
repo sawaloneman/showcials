@@ -58,7 +58,7 @@ async function serveFile(req,res,file,type){let stat;try{stat=await fs.promises.
 const server=http.createServer(async(req,res)=>{try{
  const u=new URL(req.url,'http://local'),p=u.pathname;if(!originOK(req))throw problem(403,'Open Showcials directly to continue.');
  applyRequestBudget(req,u,rooms,equal,rate,ip(req));
- if((req.method==='GET'||req.method==='HEAD')&&p==='/api/health')return json(res,200,{ok:true,app:'Showcials Orbit',version:'11.1.0-tv-development',capabilities:{tvConnector:true},rooms:rooms.size,ts:now()});
+ if((req.method==='GET'||req.method==='HEAD')&&p==='/api/health')return json(res,200,{ok:true,app:'Showcials Orbit',version:'11.3.0',capabilities:{tvConnector:true,atomicEndOfTalk:true,nativeMemberBudgets:true},rooms:rooms.size,ts:now()});
  if(req.method==='POST'&&p==='/api/rooms/new'){await body(req);rate('new:'+ip(req),8,3600000);return json(res,201,{room:createRoom().slug})}
  if(req.method==='GET'&&p==='/api/catalog')return json(res,200,[]);
  if(req.method==='GET'&&(p==='/api/rooms'||p==='/api/guilds'))return json(res,200,[]);
